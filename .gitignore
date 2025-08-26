@@ -43,9 +43,7 @@ __pycache__/
 #  Source/demo folders
 # ========================
 /source_documents/
-/demo/
-database/
-scripts/
+/database/
 
 # ========================
 #  IDE and Editor config
