@@ -1,0 +1,96 @@
+# =====================
+#  Environment files
+# =====================
+.env
+*.env
+.env.*
+!.env.example
+
+googlecloudvisionservice.json
+backend/googlecloudvisionservice.json
+*.pem
+*.key
+*.cer
+*.crt
+
+# =========================
+#  Database Wallets
+# =========================
+Wallet_*/
+**/Wallet_*/
+database/Wallet_*
+*.sso
+*.p12
+*.ora
+cwallet.*
+ewallet.*
+sqlnet.ora
+tnsnames.ora
+
+# ========================
+#  Python related
+# ========================
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# ========================
+#  Testing
+# ========================
+/coverage
+
+# ========================
+#  Source/demo folders
+# ========================
+/source_documents/
+/demo/
+database/
+scripts/
+
+# ========================
+#  IDE and Editor config
+# ========================
+.vscode/
+.idea/
+
+# ========================
+#  OS-specific files
+# ========================
+.DS_Store
+Thumbs.db
+
+# ========================
+#  Node.js/Yarn/npm
+# ========================
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# ========================
+#  Next.js and Vercel
+# ========================
+/.next/
+/out/
+/build
+/vercel
+next-env.d.ts
+node_modules
+.next
+
+# ========================
+#  Debug logs
+# ========================
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ========================
+#  TypeScript
+# ========================
+*.tsbuildinfo

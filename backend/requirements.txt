@@ -1,0 +1,21 @@
+fastapi
+uvicorn
+oracledb
+pydantic
+python-dotenv
+PyPDF2
+pdfplumber
+pytesseract
+Pillow
+langchain
+langchain-community
+sentence-transformers
+numpy==1.26.4
+google-cloud-vision
+python-multipart
+torch --index-url https://download.pytorch.org/whl/cu121
+transformers
+asyncio
+aiofiles
+easyocr
+opencv-python
