@@ -14,6 +14,7 @@ class SQLGenerator:
             base_url="https://api.deepseek.com"
         )
         
+        # แก้ไข schema ให้ตรงกับเวอร์ชันใหม่
         self.schema = """
         CREATE TABLE documents (
             id NUMBER DEFAULT doc_seq.NEXTVAL PRIMARY KEY,
@@ -22,7 +23,8 @@ class SQLGenerator:
             description CLOB,
             page_count NUMBER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            properties JSON
+            properties JSON,
+            file_data BLOB
         );
 
         CREATE TABLE content_segments (
@@ -48,7 +50,7 @@ class SQLGenerator:
     def generate_sql(self, query: str, doc_filename: Optional[str] = None) -> Dict:
         query_lower = query.lower()
         
-        # Single page patterns
+        # Single page patterns - แก้ไขให้ใช้ชื่อ column ใหม่
         single_page_match = re.search(r'หน้า\s*(\d+)(?!\s*[-–ถึงและ])|page\s*(\d+)(?!\s*[-–to])', query_lower)
         if single_page_match:
             page_num = single_page_match.group(1) or single_page_match.group(2)
@@ -70,7 +72,7 @@ class SQLGenerator:
                 'confidence': 0.95
             }
         
-        # Multiple specific pages (e.g., "หน้า 59 และ 78", "หน้า 10, 20, 30")
+        # Multiple pages - แก้ไขให้ใช้ชื่อ column ใหม่
         multiple_pages = re.findall(r'\d+', query_lower)
         if len(multiple_pages) >= 2 and any(word in query_lower for word in ['หน้า', 'page']) and any(word in query_lower for word in ['และ', 'กับ', ',', 'and']):
             page_list = ','.join(multiple_pages)
@@ -92,7 +94,7 @@ class SQLGenerator:
                 'confidence': 0.95
             }
         
-        # Page range patterns
+        # Page range patterns - แก้ไขให้ใช้ชื่อ column ใหม่
         page_match = re.search(r'หน้า\s*(\d+)\s*[-–ถึง]\s*(\d+)|page\s*(\d+)\s*[-–to]\s*(\d+)', query_lower)
         if page_match:
             start = page_match.group(1) or page_match.group(3)
@@ -115,12 +117,11 @@ class SQLGenerator:
                 'confidence': 0.95
             }
         
-        # Document count/pages queries
+        # Document count/pages queries - แก้ไขให้ใช้ชื่อ column ใหม่
         if any(word in query_lower for word in ['จำนวนหน้า', 'กี่หน้า', 'how many pages']):
             sql = 'SELECT d.name, d.file_name, d.page_count FROM documents d'
             conditions = []
             
-            # Extract numbers from query
             numbers = re.findall(r'\d+', query_lower)
             
             if ('มากกว่า' in query_lower or 'เกิน' in query_lower or 'more than' in query_lower) and numbers:
@@ -131,7 +132,7 @@ class SQLGenerator:
                 conditions.append(f'd.page_count = {numbers[0]}')
             
             if doc_filename:
-                conditions.append('d.filename = :filename')
+                conditions.append('d.file_name = :filename')
             
             if conditions:
                 sql += ' WHERE ' + ' AND '.join(conditions)
@@ -146,7 +147,7 @@ class SQLGenerator:
                 'confidence': 0.9
             }
         
-        # Table queries
+        # Table queries - แก้ไขให้ใช้ชื่อ column ใหม่
         if any(word in query_lower for word in ['ตาราง', 'table', 'กี่ตาราง']):
             sql = '''SELECT c.content, c.page_ref, d.file_name, d.name 
                     FROM content_segments c 
@@ -154,7 +155,7 @@ class SQLGenerator:
                     WHERE c.category = 'table' '''
             
             if doc_filename:
-                sql += 'AND d.filename = :filename '
+                sql += 'AND d.file_name = :filename '
             
             sql += 'ORDER BY c.page_ref FETCH FIRST 50 ROWS ONLY'
             
@@ -174,8 +175,8 @@ SCHEMA:
 
 RULES:
 1. ONLY generate SELECT statements - NEVER use INSERT, UPDATE, DELETE, DROP, ALTER, CREATE
-2. For numbers in WHERE clause, put the value directly (e.g., total_pages > 100), NOT as parameter
-3. Only use :filename parameter for filename, nothing else
+2. For numbers in WHERE clause, put the value directly (e.g., page_count > 100), NOT as parameter
+3. Only use :filename parameter for file_name, nothing else  
 4. For semantic search, use: VECTOR_DISTANCE(c.vector_data, :query_embedding, COSINE)
 5. Always add FETCH FIRST 50 ROWS ONLY to limit results
 6. Return format: {{"sql": "...", "needs_embedding": true/false, "embedding_terms": ["term1", "term2"], "query_type": "metadata|content|hybrid", "confidence": 0.0-1.0}}
@@ -200,6 +201,7 @@ Return ONLY the JSON object, no markdown, no code blocks, no explanations."""
 
             result_text = response.choices[0].message.content.strip()
 
+            # Parse JSON response
             if '```json' in result_text:
                 match = re.search(r'```json\s*(.*?)\s*```', result_text, re.DOTALL)
                 if match:

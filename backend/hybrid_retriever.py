@@ -213,7 +213,7 @@ class HybridRetriever:
             }
 
     def _sql_row_to_chunk(self, row: Dict) -> Dict:
-        metadata = row.get('metadata')
+        metadata = row.get('attributes') or row.get('metadata')
         if metadata is None:
             metadata = {}
         elif isinstance(metadata, str):
@@ -221,14 +221,12 @@ class HybridRetriever:
                 metadata = json.loads(metadata)
             except:
                 metadata = {}
-        elif not isinstance(metadata, dict):
-            metadata = {}
 
-        chunk_text = row.get('chunk_text', '')
+        chunk_text = row.get('content', '')
         if not chunk_text:
-            title = row.get('title', '')
-            filename = row.get('filename', '')
-            total_pages = row.get('total_pages', 0)
+            title = row.get('name', '')
+            filename = row.get('file_name', '')
+            total_pages = row.get('page_count', 0)
 
             if title or filename:
                 parts = []
@@ -243,13 +241,13 @@ class HybridRetriever:
                 chunk_text = "ไม่มีข้อมูล"
 
         return {
-            'chunk_id': row.get('chunk_id', 0),
-            'doc_id': row.get('doc_id', 0),
+            'chunk_id': row.get('id', 0),
+            'doc_id': row.get('document_id', 0),
             'text': chunk_text,
-            'page': row.get('page_number', 0),
-            'type': row.get('chunk_type', 'text'),
-            'filename': row.get('filename', ''),
-            'title': row.get('title', ''),
+            'page': row.get('page_ref', 0),
+            'type': row.get('category', 'text'),
+            'filename': row.get('file_name', ''),
+            'title': row.get('name', ''),
             'score': 1.0,
             'source': 'sql',
             'metadata': metadata
