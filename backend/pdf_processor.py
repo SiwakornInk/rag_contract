@@ -139,7 +139,8 @@ class PDFProcessor:
             import time
             start_time = time.time()
             
-            img = page.to_image(resolution=200)
+            # เพิ่ม resolution สำหรับ Cloud OCR
+            img = page.to_image(resolution=300)
             img_buffer = io.BytesIO()
             img.save(img_buffer, format='PNG')
             img_buffer.seek(0)
@@ -150,8 +151,14 @@ class PDFProcessor:
             from google.api_core.client_options import ClientOptions
             from google.api_core.timeout import TimeoutToDeadlineTimeout
             
+            # เพิ่ม language hints สำหรับภาษาไทย
+            image_context = vision.ImageContext(
+                language_hints=['th', 'en']  # ระบุภาษาไทยและอังกฤษ
+            )
+            
             response = self.vision_client.text_detection(
                 image=image, 
+                image_context=image_context,
                 timeout=30
             )
             
@@ -166,7 +173,7 @@ class PDFProcessor:
             return ""
     
     def _preprocess_image_for_ocr(self, img_array: np.ndarray) -> np.ndarray:
-        """Preprocess image for better OCR results"""
+        """Preprocess image for better OCR results with Thai text"""
         from PIL import Image, ImageEnhance, ImageFilter
         import cv2
         
@@ -177,19 +184,28 @@ class PDFProcessor:
         if img_pil.mode != 'L':
             img_pil = img_pil.convert('L')
         
-        # เพิ่ม contrast
+        # ลด contrast เพื่อรักษารายละเอียดสระ/วรรณยุกต์
         enhancer = ImageEnhance.Contrast(img_pil)
-        img_pil = enhancer.enhance(2.0)
+        img_pil = enhancer.enhance(1.5)  # ลดจาก 2.0
         
-        # เพิ่ม sharpness
+        # ลด sharpness เพื่อไม่ให้ตัวอักษรแข็งเกินไป
         enhancer = ImageEnhance.Sharpness(img_pil)
-        img_pil = enhancer.enhance(2.0)
+        img_pil = enhancer.enhance(1.3)  # ลดจาก 2.0
         
         # Convert back to numpy
         img_array = np.array(img_pil)
         
-        # Apply threshold for better text clarity
-        _, img_array = cv2.threshold(img_array, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        # ใช้ adaptive threshold แทน binary threshold
+        # ดีกว่าสำหรับเอกสารที่มีแสงไม่สม่ำเสมอ
+        img_array = cv2.adaptiveThreshold(
+            img_array, 255, 
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+            cv2.THRESH_BINARY, 
+            11, 2
+        )
+        
+        # ลด noise
+        img_array = cv2.medianBlur(img_array, 3)
         
         return img_array
     
@@ -197,7 +213,8 @@ class PDFProcessor:
         try:
             self._init_easyocr()
             
-            img = page.to_image(resolution=200)
+            # เพิ่ม resolution เป็น 300 dpi สำหรับภาษาไทย
+            img = page.to_image(resolution=300)
             img_buffer = io.BytesIO()
             img.save(img_buffer, format='PNG')
             
@@ -207,7 +224,15 @@ class PDFProcessor:
             # Preprocess image for better OCR
             img_array = self._preprocess_image_for_ocr(img_array)
             
-            result = self.easyocr_reader.readtext(img_array, detail=0, paragraph=True, width_ths=0.7, height_ths=0.7)
+            # ปรับ parameters สำหรับภาษาไทย
+            result = self.easyocr_reader.readtext(
+                img_array, 
+                detail=0, 
+                paragraph=True, 
+                width_ths=0.5,  # ลดลงเพื่อแยกคำดีขึ้น
+                height_ths=0.5,  # ลดลงเพื่อแยกบรรทัดดีขึ้น
+                decoder='greedy'  # เร็วและแม่นยำสำหรับภาษาไทย
+            )
             
             return '\n'.join(result)
         except Exception as e:
