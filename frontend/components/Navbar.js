@@ -1,6 +1,7 @@
 'use client'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
+import { useEffect, useState } from 'react'
 
 const styles = {
   nav: {
@@ -62,11 +63,34 @@ const styles = {
 
 export default function Navbar() {
   const pathname = usePathname()
+  const [authed, setAuthed] = useState(false)
+  const [role, setRole] = useState('')
+  const [maxLevel, setMaxLevel] = useState('')
+
+  useEffect(()=>{
+    if (typeof window !== 'undefined') {
+      const token = localStorage.getItem('token')
+      if (token) {
+        setAuthed(true)
+        setRole(localStorage.getItem('role')||'')
+        setMaxLevel(localStorage.getItem('max_level')||'')
+      }
+    }
+  }, [pathname])
+
+  const logout = () => {
+    localStorage.removeItem('token')
+    localStorage.removeItem('role')
+    localStorage.removeItem('max_level')
+    setAuthed(false)
+    window.location.href = '/login'
+  }
 
   const menuItems = [
     { href: '/', label: 'หน้าหลัก', icon: '🏠' },
-    { href: '/upload', label: 'อัพโหลด', icon: '📤' },
-    { href: '/chat', label: 'ถาม AI', icon: '💬' }
+    ...(authed ? [{ href: '/upload', label: 'อัพโหลด', icon: '📤' }] : []),
+    { href: '/chat', label: 'ถาม AI', icon: '💬' },
+    ...(authed && role==='ADMIN' && maxLevel==='SECRET' ? [{ href: '/admin/users', label: 'ผู้ใช้', icon: '👤' }] : [])
   ]
 
   return (
@@ -101,6 +125,21 @@ export default function Navbar() {
               </Link>
             </li>
           ))}
+          {!authed && (
+            <li>
+              <Link href="/login" style={{...styles.menuItem, ...(pathname === '/login'? styles.menuItemActive : {})}}>🔐 เข้าสู่ระบบ</Link>
+            </li>
+          )}
+          {authed && (
+            <li>
+              <span style={{...styles.menuItem, cursor:'pointer'}} onClick={logout}>🚪 ออกจากระบบ</span>
+            </li>
+          )}
+          {authed && (
+            <li>
+              <span style={{...styles.menuItem, background:'rgba(255,255,255,0.2)'}}>{role} · {maxLevel}</span>
+            </li>
+          )}
         </ul>
       </div>
     </nav>

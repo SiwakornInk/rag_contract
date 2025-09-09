@@ -19,3 +19,5 @@ aiofiles
 easyocr
 opencv-python
 pytest
+python-jose
+bcrypt

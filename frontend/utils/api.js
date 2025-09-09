@@ -9,11 +9,32 @@ const api = axios.create({
   }
 })
 
+api.interceptors.request.use((config) => {
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers['Authorization'] = `Bearer ${token}`
+    }
+  }
+  return config
+})
+
+export const login = async (username, password) => {
+  const res = await api.post('/auth/login', { username, password })
+  return res.data
+}
+
+export const getMe = async () => {
+  const res = await api.get('/auth/me')
+  return res.data
+}
+
 // Upload document
-export const uploadDocument = async (file, useCloudOCR = true) => {
+export const uploadDocument = async (file, useCloudOCR = true, classification='PUBLIC') => {
   const formData = new FormData()
   formData.append('file', file)
   formData.append('use_cloud_ocr', useCloudOCR.toString())
+  formData.append('classification', classification)
 
   const response = await api.post('/upload', formData, {
     headers: {

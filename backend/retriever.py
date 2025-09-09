@@ -26,7 +26,7 @@ class DocumentRetriever:
         return {}
     
     def retrieve(self, query: str, doc_filename: Optional[str] = None, 
-                top_k: int = 10) -> List[Dict]:
+                top_k: int = 10, allowed_levels: Optional[List[str]] = None) -> List[Dict]:
 
         # Check if this is a page-specific query
         page_match = re.search(r'หน้า\s*(\d+)|page\s*(\d+)', query.lower())
@@ -102,6 +102,8 @@ class DocumentRetriever:
             doc_id, 
             num_candidates
         )
+        if allowed_levels:
+            chunks = [c for c in chunks if c.get('classification') in allowed_levels]
 
         # Convert to format for reranker
         formatted_chunks = []
@@ -112,6 +114,7 @@ class DocumentRetriever:
                 'type': chunk['chunk_type'],
                 'filename': chunk['filename'],
                 'title': chunk['title'],
+                'classification': chunk.get('classification'),
                 'score': 1 - chunk['distance'],  # Convert distance to similarity
                 'metadata': chunk.get('metadata', {})
             }

@@ -106,13 +106,16 @@ export default function DocumentList({ documents, loading, onRefresh }) {
 
   const handleView = (e, docId) => {
     e.stopPropagation()
-    // เปิด PDF ในแท็บใหม่โดยตรง
-    window.open(`http://localhost:8000/document/${docId}/pdf`, '_blank')
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+    const url = token ? `http://localhost:8000/document/${docId}/pdf?token=${encodeURIComponent(token)}` : `http://localhost:8000/document/${docId}/pdf`
+    window.open(url, '_blank')
   }
 
   const handleDownload = async (e, docId) => {
     e.stopPropagation()
-    window.open(`http://localhost:8000/document/${docId}/download`, '_blank')
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+    const url = token ? `http://localhost:8000/document/${docId}/download?token=${encodeURIComponent(token)}` : `http://localhost:8000/document/${docId}/download`
+    window.open(url, '_blank')
   }
 
   if (loading) {
@@ -161,6 +164,7 @@ export default function DocumentList({ documents, loading, onRefresh }) {
           <tr>
             <th style={styles.th}>ชื่อสัญญา</th>
             <th style={styles.th}>ชื่อไฟล์</th>
+            <th style={styles.th}>ระดับ</th>
             <th style={styles.th}>จำนวนหน้า</th>
             <th style={styles.th}>วันที่อัพโหลด</th>
             <th style={styles.th}>การดำเนินการ</th>
@@ -182,6 +186,11 @@ export default function DocumentList({ documents, loading, onRefresh }) {
               </td>
               <td style={styles.td}>
                 <span style={styles.badge}>📄 {doc.filename}</span>
+              </td>
+              <td style={styles.td}>
+                <span style={{...styles.badge, backgroundColor: '#fde68a', color:'#92400e'}}>
+                  {doc.classification || 'PUBLIC'}
+                </span>
               </td>
               <td style={styles.td}>{doc.total_pages} หน้า</td>
               <td style={styles.td}>{formatDate(doc.upload_date)}</td>

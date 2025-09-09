@@ -105,9 +105,17 @@ export default function Home() {
     lastUploadDate: null,
     documentTypes: []
   })
+  const [maxLevel, setMaxLevel] = useState('')
 
   useEffect(() => {
-    loadDocuments()
+    if (typeof window !== 'undefined') {
+      if (!localStorage.getItem('token')) {
+        window.location.href = '/login'
+        return
+      }
+    }
+  setMaxLevel(localStorage.getItem('max_level')||'')
+  loadDocuments()
   }, [])
 
   const loadDocuments = async () => {
@@ -167,6 +175,11 @@ export default function Home() {
       <div style={styles.header}>
         <h1 style={styles.title}>ระบบจัดการสัญญาอัจฉริยะ</h1>
         <p style={styles.subtitle}>วิเคราะห์และค้นหาข้อมูลสัญญาด้วยเทคโนโลยี AI</p>
+        {maxLevel === 'PUBLIC' && (
+          <div style={{marginTop:'10px', padding:'10px 14px', background:'#fff7ed', color:'#9a3412', borderRadius:'8px', fontSize:'13px'}}>
+            คุณกำลังใช้งานในระดับ Public – เห็นได้เฉพาะเอกสาร Public เท่านั้น
+          </div>
+        )}
       </div>
 
       <div style={styles.statsContainer}>

@@ -44,7 +44,7 @@ class OracleVectorDB:
         return {}
     
     def insert_document(self, filename: str, title: str, abstract: str, total_pages: int,
-                        metadata: Dict, pdf_file: Optional[bytes] = None) -> int:
+                        metadata: Dict, pdf_file: Optional[bytes] = None, classification: str = "PUBLIC") -> int:
         """Insert a document and return its generated ID.
 
         The former 'description' column was removed from schema; we now persist any
@@ -59,13 +59,14 @@ class OracleVectorDB:
                 props.setdefault('abstract', abstract)
             cur.execute(
                 """
-                INSERT INTO documents (file_name, name, page_count, created_at, properties, file_data)
-                VALUES (:file_name, :name, :page_count, CURRENT_TIMESTAMP, :properties, :file_data)
+                INSERT INTO documents (file_name, name, page_count, created_at, classification_level, properties, file_data)
+                VALUES (:file_name, :name, :page_count, CURRENT_TIMESTAMP, :classification_level, :properties, :file_data)
                 RETURNING id INTO :id
                 """,
                 file_name=filename,
                 name=title,
                 page_count=total_pages,
+                classification_level=classification,
                 properties=json.dumps(props),
                 file_data=pdf_file,
                 id=id_var
@@ -103,7 +104,7 @@ class OracleVectorDB:
             embedding_str = str(query_embedding)
             sql = (
                 "SELECT c.id, c.document_id, c.category, c.page_ref, c.sequence_num, c.attributes, "
-                "d.file_name, d.name, VECTOR_DISTANCE(c.vector_data, TO_VECTOR(:embed), COSINE) distance, c.content "
+                "d.file_name, d.name, d.classification_level, VECTOR_DISTANCE(c.vector_data, TO_VECTOR(:embed), COSINE) distance, c.content "
                 "FROM content_segments c JOIN documents d ON c.document_id = d.id "
                 "WHERE (:doc_id IS NULL OR c.document_id = :doc_id) "
                 "ORDER BY distance FETCH FIRST :limit ROWS ONLY"
@@ -121,8 +122,9 @@ class OracleVectorDB:
                     'metadata': self._parse_json(r[5]),
                     'filename': r[6],
                     'title': r[7],
-                    'distance': r[8],
-                    'chunk_text': r[9].read() if r[9] else ''
+                    'classification': r[8],
+                    'distance': r[9],
+                    'chunk_text': r[10].read() if r[10] else ''
                 })
             return results
     
@@ -130,7 +132,7 @@ class OracleVectorDB:
         with self.get_connection() as conn:
             cur = conn.cursor()
             cur.execute(
-                "SELECT id, file_name, name, page_count, properties FROM documents WHERE file_name = :fn",
+                "SELECT id, file_name, name, page_count, properties, classification_level FROM documents WHERE file_name = :fn",
                 fn=filename
             )
             row = cur.fetchone()
@@ -143,21 +145,40 @@ class OracleVectorDB:
                 'title': row[2],
                 'total_pages': row[3],
                 'metadata': metadata,
-                'abstract': metadata.get('abstract', '')
+                'abstract': metadata.get('abstract', ''),
+                'classification': row[5]
             }
-    
-    def list_documents(self) -> List[Dict]:
+
+    def get_document_meta(self, doc_id: int) -> Optional[Dict]:
         with self.get_connection() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT id, file_name, name, page_count, created_at FROM documents ORDER BY created_at DESC")
-            rows = cur.fetchall()
+            cur.execute("SELECT id, file_name, classification_level FROM documents WHERE id = :i", i=doc_id)
+            row = cur.fetchone()
+            if not row:
+                return None
+            return { 'doc_id': row[0], 'filename': row[1], 'classification': row[2] }
+    
+    def list_documents(self, max_level: Optional[str] = None) -> List[Dict]:
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            level_order = {"PUBLIC":1, "INTERNAL":2, "CONFIDENTIAL":3, "SECRET":4}
+            if max_level and max_level in level_order:
+                allowed = level_order[max_level]
+                cur.execute(
+                    "SELECT id, file_name, name, page_count, created_at, classification_level FROM documents ORDER BY created_at DESC"
+                )
+                rows = [r for r in cur.fetchall() if level_order.get(r[5], 99) <= allowed]
+            else:
+                cur.execute("SELECT id, file_name, name, page_count, created_at, classification_level FROM documents ORDER BY created_at DESC")
+                rows = cur.fetchall()
             return [
                 {
                     'doc_id': r[0],
                     'filename': r[1],
                     'title': r[2],
                     'total_pages': r[3],
-                    'upload_date': r[4].isoformat() if r[4] else None
+                    'upload_date': r[4].isoformat() if r[4] else None,
+                    'classification': r[5]
                 } for r in rows
             ]
     

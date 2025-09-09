@@ -19,7 +19,7 @@ class HybridRetriever:
         self.use_sql_search = True
     
     async def retrieve(self, query: str, doc_filename: Optional[str] = None, 
-                      top_k: int = 15) -> List[Dict]:
+                      top_k: int = 15, allowed_levels: Optional[List[str]] = None) -> List[Dict]:
         query_intent = self._analyze_query_intent(query)
         print(f"Query intent: {query_intent}")
 
@@ -38,13 +38,17 @@ class HybridRetriever:
         print(f"Query: {query}")
         print(f"Needs SQL search: {needs_sql}")
 
+        # Pure vector path
         if not needs_sql:
-            chunks = self.vector_retriever.retrieve(query, doc_filename, top_k)
+            chunks = self.vector_retriever.retrieve(query, doc_filename, top_k, allowed_levels=allowed_levels)
+            if allowed_levels:
+                chunks = [c for c in chunks if (c.get('metadata', {}).get('classification') or c.get('classification')) in allowed_levels]
             if query_intent.get('is_overview_query', False):
                 chunks = self._apply_overview_boosting(chunks, query_intent)
             return chunks[:top_k]
 
-        sql_result = await self._async_sql_search(query, doc_filename)
+        # SQL + vector hybrid path
+        sql_result = await self._async_sql_search(query, doc_filename, allowed_levels)
         sql_chunks = sql_result.get('chunks', [])
         sql_confidence = sql_result.get('confidence', 0.5)
         sql_query_type = sql_result.get('query_type', 'hybrid')
@@ -52,15 +56,10 @@ class HybridRetriever:
         if sql_confidence >= 0.9 and sql_query_type == 'metadata' and sql_chunks:
             print(f"Using SQL-only results due to high confidence ({sql_confidence})")
             if self.reranker:
-                return self.reranker.rerank(
-                    query, 
-                    sql_chunks, 
-                    top_k=top_k,
-                    query_intent=query_intent
-                )
+                return self.reranker.rerank(query, sql_chunks, top_k=top_k, query_intent=query_intent)
             return sql_chunks[:top_k]
 
-        vector_chunks = await self._async_vector_search(query, doc_filename, top_k)
+        vector_chunks = await self._async_vector_search(query, doc_filename, top_k, allowed_levels)
 
         if sql_confidence >= 0.8 and sql_query_type == 'metadata':
             weights = {'vector': 0.2, 'sql': 0.8}
@@ -83,12 +82,7 @@ class HybridRetriever:
             merged_chunks = self._apply_overview_boosting(merged_chunks, query_intent)
 
         if merged_chunks and self.reranker:
-            merged_chunks = self.reranker.rerank(
-                query, 
-                merged_chunks, 
-                top_k=top_k,
-                query_intent=query_intent
-            )
+            merged_chunks = self.reranker.rerank(query, merged_chunks, top_k=top_k, query_intent=query_intent)
 
         return merged_chunks[:top_k]
     
@@ -130,19 +124,28 @@ class HybridRetriever:
         return any(indicator in query_lower for indicator in sql_indicators)
     
     async def _async_vector_search(self, query: str, doc_filename: Optional[str], 
-                                   top_k: int) -> List[Dict]:
+                                   top_k: int, allowed_levels: Optional[List[str]] = None) -> List[Dict]:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None, 
             self.vector_retriever.retrieve,
-            query, doc_filename, top_k * 2
+            query, doc_filename, top_k * 2, allowed_levels
         )
     
     async def _async_sql_search(self, query: str, 
-                       doc_filename: Optional[str]) -> Dict:
+                       doc_filename: Optional[str], allowed_levels: Optional[List[str]] = None) -> Dict:
         try:
             sql_result = self.sql_generator.generate_sql(query, doc_filename)
             sql = sql_result['sql']
+
+            # Ensure classification is selected for downstream filtering/metadata
+            if 'classification_level' not in sql.lower():
+                sql = self._inject_classification_select(sql)
+
+            # Inject classification filter according to allowed_levels
+            params_extra = {}
+            if allowed_levels:
+                sql, params_extra = self._inject_classification_filter(sql, allowed_levels)
             needs_embedding = sql_result.get('needs_embedding', False)
             embedding_terms = sql_result.get('embedding_terms', [])
             query_type = sql_result.get('query_type', 'hybrid')
@@ -152,6 +155,7 @@ class HybridRetriever:
             print(f"Query type: {query_type}, Confidence: {confidence}")
 
             params = {}
+            params.update(params_extra)
             if needs_embedding and embedding_terms:
                 combined_text = ' '.join(embedding_terms)
                 embedding = self.embedder.encode(combined_text)
@@ -197,6 +201,15 @@ class HybridRetriever:
 
                 print(f"SQL returned {len(results)} results")
 
+                # Post-filter (safety net) if classification present
+                if allowed_levels:
+                    filtered = []
+                    for c in results:
+                        c_class = c.get('classification') or c.get('metadata', {}).get('classification')
+                        if not c_class or c_class in allowed_levels:
+                            filtered.append(c)
+                    results = filtered
+
                 return {
                     'chunks': results,
                     'confidence': confidence,
@@ -240,6 +253,10 @@ class HybridRetriever:
             else:
                 chunk_text = "ไม่มีข้อมูล"
 
+        classification = row.get('classification_level') or row.get('classification')
+        if classification and isinstance(metadata_val, dict):
+            metadata_val.setdefault('classification', classification)
+
         return {
             'chunk_id': row.get('id', 0),
             'doc_id': row.get('document_id', 0),
@@ -250,8 +267,43 @@ class HybridRetriever:
             'title': row.get('name', ''),
             'score': 1.0,
             'source': 'sql',
+            'classification': classification,
             'metadata': metadata_val
         }
+
+    def _inject_classification_select(self, sql: str) -> str:
+        # Add d.classification_level to first SELECT list if not already present
+        pattern = re.compile(r'(select\s+)(.+?)(\s+from\s+)', re.IGNORECASE | re.DOTALL)
+        def repl(m):
+            select_list = m.group(2)
+            if 'd.classification_level' in select_list.lower():
+                return m.group(0)
+            # Avoid duplicating trailing spaces
+            return f"{m.group(1)}{select_list.strip()}, d.classification_level{m.group(3)}"
+        new_sql = pattern.sub(repl, sql, count=1)
+        return new_sql
+
+    def _inject_classification_filter(self, sql: str, allowed_levels: List[str]):
+        # Build parameter placeholders
+        params = {}
+        placeholders = []
+        for idx, lvl in enumerate(allowed_levels):
+            key = f"cl{idx}"
+            params[key] = lvl
+            placeholders.append(f":{key}")
+        clause = f"d.classification_level IN ({', '.join(placeholders)})"
+        sql_lower = sql.lower()
+        if ' where ' in sql_lower:
+            # insert after WHERE but before any group/order/fetch
+            pattern = re.compile(r'where', re.IGNORECASE)
+            # To avoid complex parsing just append AND before ORDER BY / FETCH
+            sql = re.sub(r'(where\s+)(.*?)(order by|fetch first|$)', lambda m: f"{m.group(1)}{m.group(2)} AND {clause} {m.group(3)}", sql, flags=re.IGNORECASE | re.DOTALL, count=1)
+        else:
+            # insert before ORDER BY / FETCH
+            sql = re.sub(r'(order by|fetch first)', f"WHERE {clause} \1", sql, flags=re.IGNORECASE, count=1)
+            if 'WHERE' not in sql.upper():
+                sql += f" WHERE {clause}"
+        return sql, params
 
     def _merge_and_dedupe(self, vector_chunks: List[Dict], 
                          sql_chunks: List[Dict]) -> List[Dict]:

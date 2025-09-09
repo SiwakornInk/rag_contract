@@ -176,6 +176,9 @@ const styles = {
 export default function UploadPage() {
   const [file, setFile] = useState(null)
   const [useCloudOCR, setUseCloudOCR] = useState(true)
+  const [classification, setClassification] = useState('PUBLIC')
+  const [role, setRole] = useState('')
+  const [maxLevel, setMaxLevel] = useState('')
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [result, setResult] = useState(null)
@@ -238,7 +241,7 @@ export default function UploadPage() {
     }, 500)
 
     try {
-      const response = await uploadDocument(file, useCloudOCR)
+  const response = await uploadDocument(file, useCloudOCR, classification)
       clearInterval(interval)
       setProgress(100)
       setResult(response)
@@ -253,6 +256,16 @@ export default function UploadPage() {
     } finally {
       setUploading(false)
     }
+  }
+
+  // Check auth
+  if (typeof window !== 'undefined' && !localStorage.getItem('token')) {
+    if (typeof window !== 'undefined') window.location.href = '/login'
+    return null
+  }
+  if (typeof window !== 'undefined' && !role) {
+    setRole(localStorage.getItem('role')||'')
+    setMaxLevel(localStorage.getItem('max_level')||'')
   }
 
   return (
@@ -302,7 +315,7 @@ export default function UploadPage() {
           </div>
         )}
 
-        <div style={styles.ocrOption}>
+  <div style={styles.ocrOption}>
           <div style={styles.ocrTitle}>เลือกวิธีการสกัดข้อความ (OCR)</div>
           <div style={styles.radioGroup}>
             <label style={styles.radioLabel}>
@@ -328,13 +341,34 @@ export default function UploadPage() {
           </div>
         </div>
 
+        {maxLevel === 'SECRET' && (
+          <div style={styles.ocrOption}>
+            <div style={styles.ocrTitle}>ระดับการจัดประเภท (Classification)</div>
+            <select
+              value={classification}
+              onChange={e=>setClassification(e.target.value)}
+              style={{ padding:'10px', border:'1px solid #cbd5e1', borderRadius:'6px', fontFamily:'Prompt, sans-serif'}}>
+              <option value="PUBLIC">Public</option>
+              <option value="INTERNAL">Internal</option>
+              <option value="CONFIDENTIAL">Confidential</option>
+              <option value="SECRET">Secret</option>
+            </select>
+          </div>
+        )}
+
+        {maxLevel !== 'SECRET' && (
+          <div style={{...styles.warning, background:'#e2e8f0', color:'#475569'}}>
+            คุณมีสิทธิ์อัพโหลดเฉพาะผู้ใช้ระดับสูงสุด (SECRET) เท่านั้น – เข้าสู่ระบบด้วยบัญชีที่มีสิทธิ์เพื่ออัพโหลด
+          </div>
+        )}
+
         <button
           style={{
             ...styles.uploadButton,
-            ...((!file || uploading) ? styles.uploadButtonDisabled : {})
+            ...((!file || uploading || maxLevel !== 'SECRET') ? styles.uploadButtonDisabled : {})
           }}
           onClick={handleUpload}
-          disabled={!file || uploading}
+          disabled={!file || uploading || maxLevel !== 'SECRET'}
         >
           {uploading ? 'กำลังอัพโหลด...' : 'อัพโหลดเอกสาร'}
         </button>
