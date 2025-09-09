@@ -26,6 +26,8 @@ cwallet.*
 ewallet.*
 sqlnet.ora
 tnsnames.ora
+history.log
+docker_scripts.txt
 
 # ========================
 #  Python related
@@ -43,7 +45,6 @@ __pycache__/
 #  Source/demo folders
 # ========================
 /source_documents/
-/database/
 
 # ========================
 #  IDE and Editor config
