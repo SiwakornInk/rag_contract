@@ -16,11 +16,11 @@ class SQLGenerator:
         
         # แก้ไข schema ให้ตรงกับเวอร์ชันใหม่
         self.schema = """
+        -- Current runtime schema (description column removed)
         CREATE TABLE documents (
             id NUMBER DEFAULT doc_seq.NEXTVAL PRIMARY KEY,
             file_name VARCHAR2(500) NOT NULL,
             name VARCHAR2(1000),
-            description CLOB,
             page_count NUMBER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             properties JSON,

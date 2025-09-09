@@ -1,0 +1,51 @@
+version: '3.9'
+services:
+  oracle-db:
+    image: container-registry.oracle.com/database/free:latest
+    container_name: oracle-db
+    environment:
+      ORACLE_PWD: Oradbpwd123
+      ORACLE_PASSWORD: Oradbpwd123
+      ORACLE_CHARACTERSET: AL32UTF8
+    ports:
+      - "1521:1521"
+      - "5500:5500"
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo 'select 1 from dual;' | sqlplus -s sys/Oradbpwd123@localhost:1521/FREEPDB1 as sysdba"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+
+  backend:
+    build: ./backend
+    container_name: backend
+    depends_on:
+      - oracle-db
+    environment:
+      DB_USER: appuser
+      DB_PASSWORD: appuserpwd
+      DB_HOST: oracle-db
+      DB_PORT: 1521
+      DB_SERVICE: FREEPDB1
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GOOGLE_APPLICATION_CREDENTIALS: /app/googlecloudvisionservice.json
+    volumes:
+      - ./backend/googlecloudvisionservice.json:/app/googlecloudvisionservice.json:ro
+      - ./source_documents:/app/source_documents:ro
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+
+volumes:
+  oracle-data:

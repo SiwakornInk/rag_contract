@@ -2,11 +2,8 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional, List
-from reranker import Reranker
+from typing import Optional
 import os
-import asyncio
-import shutil
 import io
 from urllib.parse import quote
 
@@ -22,7 +19,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["*"],  # Simplify for internal Docker network
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

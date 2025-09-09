@@ -261,29 +261,20 @@ class DocumentRetriever:
         # Fetch surrounding chunks
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            
             if surrounding_pages:
-                # Create query for multiple pages
                 page_list = list(surrounding_pages)
-                placeholders = ','.join([f':{i+1}' for i in range(len(page_list))])
-                
+                placeholders = ','.join([str(p) for p in page_list])
+                # Fetch context from new schema tables
                 query = f"""
-                    SELECT chunk_text, chunk_type, page_number, chunk_order, metadata,
-                           (SELECT filename FROM thesis_documents WHERE doc_id = :doc_id) as filename,
-                           (SELECT title FROM thesis_documents WHERE doc_id = :doc_id) as title
-                    FROM thesis_chunks
-                    WHERE doc_id = :doc_id 
-                    AND page_number IN ({placeholders})
-                    ORDER BY page_number, chunk_order
+                    SELECT c.content, c.category, c.page_ref, c.sequence_num, c.attributes,
+                           d.file_name, d.name
+                    FROM content_segments c
+                    JOIN documents d ON c.document_id = d.id
+                    WHERE c.document_id = :doc_id
+                      AND c.page_ref IN ({placeholders})
+                    ORDER BY c.page_ref, c.sequence_num
                 """
-                
-                # Prepare parameters
-                params = [doc_id, doc_id, doc_id]  # for the three :doc_id in subqueries
-                params.extend(page_list)
-                
-                cursor.execute(query, params)
-                
-                # Add surrounding chunks with lower priority
+                cursor.execute(query, {'doc_id': doc_id})
                 for row in cursor:
                     chunks.append({
                         'text': row[0].read() if row[0] else '',
@@ -291,7 +282,7 @@ class DocumentRetriever:
                         'page': row[2],
                         'filename': row[5],
                         'title': row[6],
-                        'score': 0.3,  # Lower score for context chunks
+                        'score': 0.3,
                         'rerank_score': 0.3,
                         'final_score': 0.3,
                         'metadata': self._parse_json(row[4])
@@ -334,13 +325,15 @@ class DocumentRetriever:
         
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT chunk_text, chunk_type, chunk_order, metadata
-                FROM thesis_chunks
-                WHERE doc_id = :1 AND page_number = :2
-                ORDER BY chunk_order
-            """, [doc['doc_id'], page_number])
-            
+            cursor.execute(
+                """
+                SELECT content, category, sequence_num, attributes
+                FROM content_segments
+                WHERE document_id = :doc_id AND page_ref = :page
+                ORDER BY sequence_num
+                """,
+                {'doc_id': doc['doc_id'], 'page': page_number}
+            )
             results = []
             for row in cursor:
                 results.append({
@@ -349,5 +342,4 @@ class DocumentRetriever:
                     'order': row[2],
                     'metadata': self._parse_json(row[3])
                 })
-            
             return results

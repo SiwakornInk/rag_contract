@@ -167,7 +167,8 @@ class HybridRetriever:
             elif doc_filename and ':filename' in sql:
                 params['filename'] = doc_filename
 
-            with self.db.get_readonly_connection() as conn:
+            # Use standard pooled connection (transaction is read-only logically by our queries)
+            with self.db.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(sql, params)
 
@@ -213,21 +214,20 @@ class HybridRetriever:
             }
 
     def _sql_row_to_chunk(self, row: Dict) -> Dict:
-        metadata = row.get('attributes') or row.get('metadata')
-        if metadata is None:
-            metadata = {}
-        elif isinstance(metadata, str):
+        metadata_val = row.get('attributes') or row.get('metadata')
+        if metadata_val is None:
+            metadata_val = {}
+        elif isinstance(metadata_val, str):
             try:
-                metadata = json.loads(metadata)
-            except:
-                metadata = {}
+                metadata_val = json.loads(metadata_val)
+            except Exception:
+                metadata_val = {}
 
         chunk_text = row.get('content', '')
         if not chunk_text:
             title = row.get('name', '')
             filename = row.get('file_name', '')
             total_pages = row.get('page_count', 0)
-
             if title or filename:
                 parts = []
                 if title:
@@ -250,7 +250,7 @@ class HybridRetriever:
             'title': row.get('name', ''),
             'score': 1.0,
             'source': 'sql',
-            'metadata': metadata
+            'metadata': metadata_val
         }
 
     def _merge_and_dedupe(self, vector_chunks: List[Dict], 
