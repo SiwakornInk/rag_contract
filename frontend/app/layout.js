@@ -1,5 +1,6 @@
 import { Inter } from 'next/font/google'
 import Navbar from '@/components/Navbar'
+import './globals.css' // Import the global stylesheet
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -8,29 +9,17 @@ export const metadata = {
   description: 'ระบบวิเคราะห์และค้นหาข้อมูลสัญญาด้วย AI',
 }
 
-const styles = {
-  html: {
-    height: '100%'
-  },
-  body: {
-    margin: 0,
-    padding: 0,
-    fontFamily: 'Inter, Prompt, sans-serif',
-    backgroundColor: '#f8f9fa',
-    minHeight: '100vh',
-    color: '#1a202c'
-  }
-}
-
 export default function RootLayout({ children }) {
   return (
-    <html lang="th" style={styles.html}>
+    <html lang="th">
       <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="true" />
         <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
       </head>
-      <body className={inter.className} style={styles.body}>
+      <body className={inter.className}>
         <Navbar />
-        {children}
+        <main>{children}</main>
       </body>
     </html>
   )

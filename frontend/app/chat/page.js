@@ -1,70 +1,22 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import ChatInterface from '@/components/ChatInterface'
 import { getDocuments } from '@/utils/api'
+import styles from './ChatPage.module.css'
 
-const styles = {
-  container: {
-    height: 'calc(100vh - 70px)',
-    display: 'flex',
-    backgroundColor: '#f8f9fa'
-  },
-  sidebar: {
-    width: '300px',
-    backgroundColor: 'white',
-    borderRight: '1px solid #e5e7eb',
-    padding: '20px',
-    overflowY: 'auto'
-  },
-  sidebarTitle: {
-    fontSize: '18px',
-    fontWeight: '600',
-    color: '#1e3a8a',
-    marginBottom: '20px',
-    fontFamily: 'Prompt, sans-serif'
-  },
-  documentList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px'
-  },
-  documentItem: {
-    padding: '12px',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-    border: '1px solid transparent',
-    fontSize: '14px'
-  },
-  documentItemActive: {
-    backgroundColor: '#eff6ff',
-    border: '1px solid #1e3a8a'
-  },
-  documentItemHover: {
-    backgroundColor: '#f1f5f9'
-  },
-  allDocsOption: {
-    padding: '12px',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    backgroundColor: '#1e3a8a',
-    color: 'white',
-    textAlign: 'center',
-    fontWeight: '500',
-    marginBottom: '15px',
-    fontFamily: 'Prompt, sans-serif'
-  },
-  mainContent: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column'
-  }
+const levelColors = {
+  'PUBLIC': { bg: '#e0f2fe', text: '#0c4a6e' },
+  'INTERNAL': { bg: '#d1fae5', text: '#065f46' },
+  'CONFIDENTIAL': { bg: '#ffedd5', text: '#9a3412' },
+  'SECRET': { bg: '#fee2e2', text: '#991b1b' },
+  'DEFAULT': { bg: '#e5e7eb', text: '#4b5563' }
 }
 
 export default function ChatPage() {
   const [documents, setDocuments] = useState([])
   const [selectedDoc, setSelectedDoc] = useState(null)
-  const [hoveredDoc, setHoveredDoc] = useState(null)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [filterLevel, setFilterLevel] = useState('ALL')
 
   useEffect(() => {
     loadDocuments()
@@ -79,49 +31,76 @@ export default function ChatPage() {
     }
   }
 
+  const filteredDocuments = useMemo(() => {
+    return documents
+      .filter(doc => {
+        const searchLower = searchTerm.toLowerCase()
+        return doc.title?.toLowerCase().includes(searchLower) || doc.filename?.toLowerCase().includes(searchLower)
+      })
+      .filter(doc => {
+        if (filterLevel === 'ALL') return true
+        return (doc.classification || 'PUBLIC') === filterLevel
+      })
+  }, [documents, searchTerm, filterLevel])
+
+  const classificationLevels = ['ALL', 'PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'SECRET']
+
   return (
-    <div style={styles.container}>
-      <div style={styles.sidebar}>
-        <h2 style={styles.sidebarTitle}>เลือกเอกสาร</h2>
+    <div className={styles.container}>
+      <div className={styles.sidebar}>
+        <h2 className={styles.sidebarTitle}>เลือกเอกสารสำหรับถาม AI</h2>
         
+        <div className={styles.controls}>
+          <input
+            type="text"
+            placeholder="ค้นหาด้วยชื่อเรื่องหรือชื่อไฟล์..."
+            className={styles.searchInput}
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+          <select
+            className={styles.filterSelect}
+            value={filterLevel}
+            onChange={(e) => setFilterLevel(e.target.value)}
+          >
+            {classificationLevels.map(level => (
+              <option key={level} value={level}>{level}</option>
+            ))}
+          </select>
+        </div>
+
         <div
-          style={{
-            ...styles.allDocsOption,
-            ...(selectedDoc === null ? { backgroundColor: '#0f172a' } : {})
-          }}
+          className={`${styles.allDocsOption} ${selectedDoc === null ? styles.active : ''}`}
           onClick={() => setSelectedDoc(null)}
         >
           ค้นหาจากทุกเอกสาร
         </div>
 
-        <div style={styles.documentList}>
-          {documents.map((doc) => (
-            <div
-              key={doc.doc_id}
-              style={{
-                ...styles.documentItem,
-                ...(selectedDoc?.doc_id === doc.doc_id ? styles.documentItemActive : {}),
-                ...(hoveredDoc === doc.doc_id ? styles.documentItemHover : {})
-              }}
-              onMouseEnter={() => setHoveredDoc(doc.doc_id)}
-              onMouseLeave={() => setHoveredDoc(null)}
-              onClick={() => setSelectedDoc(doc)}
-            >
-              <div style={{ fontWeight: '500', marginBottom: '4px' }}>
-                {doc.title}
+        <div className={styles.documentList}>
+      {filteredDocuments.map((doc) => {
+            const level = doc.classification || 'PUBLIC'
+            const color = levelColors[level] || levelColors['DEFAULT']
+            return (
+              <div
+                key={doc.doc_id}
+                className={`${styles.documentItem} ${selectedDoc?.doc_id === doc.doc_id ? styles.active : ''}`}
+                onClick={() => setSelectedDoc(doc)}
+              >
+        <div className={styles.docTitle}>{doc.title}</div>
+        <div className={styles.docFilename}>{doc.filename}</div>
+                <div className={styles.docDetails}>
+                  <span className={styles.badge} style={{ backgroundColor: color.bg, color: color.text }}>
+                    {level}
+                  </span>
+                  <span>{doc.total_pages} หน้า</span>
+                </div>
               </div>
-              <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '2px' }}>
-                📄 {doc.filename}
-              </div>
-              <div style={{ fontSize: '12px', color: '#94a3b8' }}>
-                {doc.total_pages} หน้า
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 
-      <div style={styles.mainContent}>
+      <div className={styles.mainContent}>
         <ChatInterface selectedDocument={selectedDoc} />
       </div>
     </div>
