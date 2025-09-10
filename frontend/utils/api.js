@@ -81,4 +81,31 @@ export const healthCheck = async () => {
   return response.data
 }
 
+// ================= Templates APIs =================
+export const listTemplates = async () => {
+  const res = await api.get('/templates')
+  return res.data
+}
+
+export const uploadTemplate = async (file, docType = '', language = '') => {
+  const form = new FormData()
+  form.append('file', file)
+  if (docType) form.append('doc_type', docType)
+  if (language) form.append('language', language)
+  const res = await api.post('/templates/upload', form, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+  return res.data
+}
+
+export const getTemplateFields = async (templateId) => {
+  const res = await api.get(`/templates/${templateId}/fields`)
+  return res.data
+}
+
+export const generateContract = async (templateId, values) => {
+  const res = await api.post(`/templates/${templateId}/generate`, values, { responseType: 'blob' })
+  return res.data
+}
+
 export default api

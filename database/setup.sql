@@ -78,3 +78,24 @@ VALUES ('admin', '$2b$12$6GH8Qqq6GFOLl8L/vxUv8OK93Es9UfhsYdLuzASSidKQkUyORpcRm',
 COMMIT;
 
 PROMPT Schema ready with classification & auth.
+
+-- Templates feature ------------------------------------------------------
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE templates CASCADE CONSTRAINTS PURGE'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE templates_seq'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+
+CREATE SEQUENCE templates_seq START WITH 1 INCREMENT BY 1 NOCACHE;
+
+CREATE TABLE templates (
+    id NUMBER DEFAULT templates_seq.NEXTVAL PRIMARY KEY,
+    name VARCHAR2(500),
+    original_filename VARCHAR2(500),
+    doc_type VARCHAR2(100),
+    language VARCHAR2(50),
+    fields_json CLOB,
+    content_text CLOB,
+    file_data BLOB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR2(100)
+);

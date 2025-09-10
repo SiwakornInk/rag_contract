@@ -236,9 +236,107 @@ class OracleVectorDB:
                 has_docs = cur.fetchone() is not None
                 cur.execute("SELECT 1 FROM user_tables WHERE table_name = 'CONTENT_SEGMENTS'")
                 has_segments = cur.fetchone() is not None
+                cur.execute("SELECT 1 FROM user_tables WHERE table_name = 'TEMPLATES'")
+                has_templates = cur.fetchone() is not None
             except Exception as e:
                 raise RuntimeError(f"Schema check failed: {e}")
             if not (has_docs and has_segments):
                 raise RuntimeError(
                     "Schema missing. Run database/setup.sql first (as APPUSER) before starting backend."
                 )
+
+    # ================= Templates API =================
+    def insert_template(self, name: str, original_filename: str, doc_type: str, language: str,
+                        file_bytes: bytes, content_text: str, created_by: str) -> int:
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            id_var = cur.var(oracledb.NUMBER)
+            cur.execute(
+                """
+                INSERT INTO templates (name, original_filename, doc_type, language, fields_json, content_text, file_data, created_by)
+                VALUES (:name, :original_filename, :doc_type, :language, EMPTY_CLOB(), :content_text, :file_data, :created_by)
+                RETURNING id INTO :id
+                """,
+                name=name,
+                original_filename=original_filename,
+                doc_type=doc_type,
+                language=language,
+                content_text=content_text,
+                file_data=file_bytes,
+                created_by=created_by,
+                id=id_var
+            )
+            raw_val = id_var.getvalue()
+            if isinstance(raw_val, list):
+                raw_val = raw_val[0] if raw_val else None
+            if raw_val is None:
+                # fallback
+                cur.execute("SELECT MAX(id) FROM templates")
+                row = cur.fetchone()
+                if not row or row[0] is None:
+                    raise RuntimeError("Failed to retrieve new template id")
+                new_id = int(row[0])
+            else:
+                new_id = int(raw_val)
+            conn.commit()
+            return new_id
+
+    def update_template_fields(self, template_id: int, fields_json: str):
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("UPDATE templates SET fields_json = :f WHERE id = :i", f=fields_json, i=template_id)
+            conn.commit()
+
+    def list_templates(self) -> List[Dict]:
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id, name, original_filename, doc_type, language, created_at, fields_json
+                  FROM templates
+                 ORDER BY created_at DESC
+                """
+            )
+            rows = cur.fetchall()
+            results = []
+            for r in rows:
+                item = {
+                    'id': r[0],
+                    'name': r[1],
+                    'original_filename': r[2],
+                    'doc_type': r[3],
+                    'language': r[4],
+                    'created_at': r[5].isoformat() if r[5] else None,
+                    'fields_json': r[6].read() if hasattr(r[6], 'read') else (r[6] or '')
+                }
+                try:
+                    arr = json.loads(item['fields_json'] or '[]')
+                    item['fields_count'] = len(arr) if isinstance(arr, list) else 0
+                except Exception:
+                    item['fields_count'] = 0
+                results.append(item)
+            return results
+
+    def get_template_by_id(self, template_id: int) -> Optional[Dict]:
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, name, original_filename, doc_type, language, fields_json, content_text, file_data FROM templates WHERE id = :i",
+                i=template_id
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            fields_json = row[5].read() if hasattr(row[5], 'read') else (row[5] or '')
+            content_text = row[6].read() if hasattr(row[6], 'read') else (row[6] or '')
+            file_blob = row[7]
+            return {
+                'id': row[0],
+                'name': row[1],
+                'original_filename': row[2],
+                'doc_type': row[3],
+                'language': row[4],
+                'fields_json': fields_json,
+                'content_text': content_text,
+                'file_data': file_blob.read() if hasattr(file_blob, 'read') else file_blob
+            }

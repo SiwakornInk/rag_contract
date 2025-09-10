@@ -1,5 +1,6 @@
 import os
 import re
+import json
 from openai import OpenAI
 from typing import List, Dict
 from dotenv import load_dotenv
@@ -61,6 +62,78 @@ class LLMHandler:
             'answer': answer,
             'sources': self._extract_sources(context_chunks)
         }
+
+    def analyze_template_placeholders(self, template_text: str) -> List[Dict]:
+        """Return JSON array of placeholders from a template text.
+
+        Output format: [{ "placeholder_name": str, "label": str, "context": str }]
+        """
+        system_prompt = (
+            "คุณคือผู้ช่วยทนายความอัจฉริยะ งานของคุณคืออ่านแม่แบบสัญญาและคืนค่า JSON Array ของช่องว่างที่ผู้ใช้ต้องกรอกเท่านั้น\n"
+            "- ตรวจจับรูปแบบช่องว่าง เช่น '....', '____', '________', ช่องว่างยาวที่ตั้งใจเว้นไว้\n"
+            "- สำหรับแต่ละช่อง ให้สร้างวัตถุ: placeholder_name (อังกฤษ, เคบินเคส, สื่อความหมาย), label (ป้ายภาษาไทยสั้นๆ), context (บริบทบรรทัด)\n"
+            "- ส่งผลลัพธ์เป็น JSON Array เท่านั้น (parse ได้) และอย่าส่งคำอธิบายอื่น"
+        )
+        user_prompt = f"แม่แบบสัญญา (ข้อความ):\n{template_text}\n\nส่งกลับเฉพาะ JSON Array เท่านั้น"
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        try:
+            response = self.client.chat.completions.create(
+                model="deepseek-chat",
+                messages=messages,
+                temperature=0.1,
+                max_tokens=2000
+            )
+            raw = response.choices[0].message.content.strip()
+        except Exception:
+            return []
+
+        # Try direct parse
+        try:
+            data = json.loads(raw)
+            if isinstance(data, list):
+                return data
+        except Exception:
+            pass
+
+        # Fallback: extract JSON array between [ ... ]
+        m = re.search(r"\[.*\]", raw, flags=re.S)
+        if m:
+            try:
+                return json.loads(m.group(0))
+            except Exception:
+                return []
+        return []
+
+    def fill_template_with_values(self, template_text: str, values: Dict[str, str]) -> str:
+        """Use LLM to fill in placeholders in template_text with provided values; return final text."""
+        system_prompt = (
+            "คุณคือผู้ช่วยจัดทำสัญญา นำค่าที่ผู้ใช้กรอกเติมลงในช่องว่างของแม่แบบ (เช่น .... หรือ ____) \n"
+            "คงถ้อยคำเดิมให้มากที่สุด ย่อหน้าและหัวข้อควรสอดคล้อง คืนผลลัพธ์เป็นข้อความสัญญาฉบับสมบูรณ์เท่านั้น"
+        )
+        values_json = json.dumps(values, ensure_ascii=False)
+        user_prompt = (
+            f"แม่แบบสัญญา (มีช่องว่าง):\n{template_text}\n\n"
+            f"ข้อมูลที่ผู้ใช้กรอก (JSON):\n{values_json}\n\n"
+            "โปรดเติมลงในช่องว่างทั้งหมดและคืนเป็นข้อความล้วนโดยไม่ใส่คำอธิบาย"
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        try:
+            response = self.client.chat.completions.create(
+                model="deepseek-chat",
+                messages=messages,
+                temperature=0.1,
+                max_tokens=6000
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            return template_text
     
     def generate_document_title(self, document_info: Dict) -> str:
         doc_type = document_info.get('document_type', 'document')

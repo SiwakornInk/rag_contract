@@ -2,11 +2,12 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Depends, Hea
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict
 import os
 import io
 from urllib.parse import quote
 import oracledb
+import logging
 
 from database import OracleVectorDB
 from auth import authenticate_user, create_token, get_current_user, ensure_can_upload, ensure_level, has_access, ensure_admin, hash_password, LEVEL_ORDER, ROLES, get_current_user_flexible
@@ -15,6 +16,8 @@ from pdf_processor import PDFProcessor
 from retriever import DocumentRetriever
 from hybrid_retriever import HybridRetriever
 from llm_handler import LLMHandler
+from docx import Document as DocxDocument
+import json
 
 
 app = FastAPI()
@@ -33,6 +36,14 @@ pdf_processor = PDFProcessor()
 retriever = DocumentRetriever(db, embedder)
 hybrid_retriever = HybridRetriever(db, embedder)
 llm_handler = LLMHandler()
+
+logger = logging.getLogger("templates")
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    fmt = logging.Formatter('[%(asctime)s] %(levelname)s - %(name)s: %(message)s')
+    handler.setFormatter(fmt)
+    logger.addHandler(handler)
+logger.setLevel(logging.INFO)
 
 class QuestionRequest(BaseModel):
     question: str
@@ -436,6 +447,159 @@ async def download_pdf(doc_id: int, user=Depends(get_current_user_flexible)):
     except Exception as e:
         print(f"Error downloading PDF: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ================= Templates Feature =================
+@app.post("/templates/upload")
+async def upload_template(
+    file: UploadFile = File(...),
+    doc_type: Optional[str] = Form(None),
+    language: Optional[str] = Form(None),
+    user=Depends(get_current_user)
+):
+    # Admin only
+    ensure_admin(user)
+    filename = file.filename or ''
+    lower = filename.lower()
+    if not (lower.endswith('.pdf') or lower.endswith('.docx')):
+        raise HTTPException(status_code=400, detail="Only .pdf or .docx allowed")
+
+    file_bytes = await file.read()
+    logger.info(f"[UPLOAD] user=%s filename=%s size=%sB doc_type=%s language=%s", user.username, filename, len(file_bytes), doc_type, language)
+
+    # Extract text
+    content_text = ""
+    try:
+        if lower.endswith('.docx'):
+            from docx import Document as _Doc
+            import io as _io
+            logger.info("[UPLOAD] Extracting text from DOCX")
+            doc = _Doc(_io.BytesIO(file_bytes))
+            lines = [p.text for p in doc.paragraphs]
+            content_text = "\n".join(lines)
+        elif lower.endswith('.pdf'):
+            # Save temporary and use existing PDF processor
+            tmp_path = f"temp_template_{os.getpid()}_{filename}"
+            with open(tmp_path, "wb") as f:
+                f.write(file_bytes)
+            try:
+                logger.info("[UPLOAD] Extracting text from PDF (Cloud OCR)")
+                pdf_data = pdf_processor.extract_pdf_content(tmp_path, use_cloud_ocr=True)
+                content_text = "\n".join(
+                    [c.get('text', '') for c in pdf_data.get('chunks', []) if c.get('text')]
+                )
+            finally:
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported template type")
+    except Exception as e:
+        logger.exception("[UPLOAD] Template text extraction failed")
+        raise HTTPException(status_code=500, detail=f"Template text extraction failed: {e}")
+
+    logger.info("[UPLOAD] Extracted text length=%d chars", len(content_text))
+
+    # Insert into DB
+    template_name = os.path.splitext(os.path.basename(filename))[0]
+    template_id = db.insert_template(
+        name=template_name,
+        original_filename=filename,
+        doc_type=doc_type or 'unknown',
+        language=language or 'unknown',
+        file_bytes=file_bytes,
+        content_text=content_text,
+        created_by=user.username
+    )
+    logger.info("[UPLOAD] Inserted template id=%s name=%s", template_id, template_name)
+
+    # Analyze placeholders with LLM
+    fields = llm_handler.analyze_template_placeholders(content_text)
+    try:
+        db.update_template_fields(template_id, json.dumps(fields, ensure_ascii=False))
+    except Exception as e:
+        logger.exception("[UPLOAD] Failed to save fields_json")
+
+    logger.info("[UPLOAD] Placeholder fields detected=%d names=%s", len(fields or []),
+                ", ".join([f.get('placeholder_name','') for f in (fields or [])][:10]))
+
+    return {
+        "template_id": template_id,
+        "name": template_name,
+        "filename": filename,
+        "doc_type": doc_type or 'unknown',
+        "language": language or 'unknown',
+        "fields": fields
+    }
+
+@app.get("/templates")
+async def list_templates_api(user=Depends(get_current_user)):
+    items = db.list_templates()
+    return {"templates": items}
+
+@app.get("/templates/{template_id}/fields")
+async def get_template_fields(template_id: int, user=Depends(get_current_user)):
+    t = db.get_template_by_id(template_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="Template not found")
+    try:
+        fields = json.loads(t.get('fields_json') or '[]')
+    except Exception:
+        fields = []
+    return {
+        "template_id": t['id'],
+        "name": t['name'],
+        "filename": t['original_filename'],
+        "fields": fields
+    }
+
+@app.post("/templates/{template_id}/generate")
+async def generate_contract(template_id: int, payload: Dict, user=Depends(get_current_user)):
+    t = db.get_template_by_id(template_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    values = payload or {}
+    logger.info("[GENERATE] user=%s template_id=%s provided_keys=%d", user.username, template_id, len(values.keys()))
+    # Validate required keys from fields_json
+    try:
+        expected = json.loads(t.get('fields_json') or '[]')
+    except Exception:
+        expected = []
+    missing = []
+    for f in expected:
+        key = f.get('placeholder_name')
+        if key and key not in values:
+            missing.append(key)
+    if missing:
+        logger.warning("[GENERATE] Missing values for keys: %s", ", ".join(missing))
+        raise HTTPException(status_code=400, detail=f"Missing values: {', '.join(missing)}")
+
+    template_text = t.get('content_text') or ''
+    logger.info("[GENERATE] Calling LLM to fill template (template_text_len=%d)", len(template_text))
+    final_text = llm_handler.fill_template_with_values(template_text, values)
+    logger.info("[GENERATE] Final text length=%d", len(final_text))
+
+    # Build docx from final_text (paragraphs by newline)
+    doc = DocxDocument()
+    for para in final_text.split('\n'):
+        doc.add_paragraph(para)
+    out = io.BytesIO()
+    doc.save(out)
+    out.seek(0)
+
+    filename_safe = f"{t['name']}_filled.docx"
+    logger.info("[GENERATE] Generated DOCX bytes=%d filename=%s", out.getbuffer().nbytes, filename_safe)
+    # Encode UTF-8 filename per RFC 5987 to avoid latin-1 header encoding issues
+    encoded_filename = quote(filename_safe.encode('utf-8'))
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+    }
+    return StreamingResponse(
+        out,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers=headers
+    )
 
 if __name__ == "__main__":
     import uvicorn

@@ -90,6 +90,8 @@ export default function Navbar() {
     { href: '/', label: 'หน้าหลัก', icon: '🏠' },
     ...(authed ? [{ href: '/upload', label: 'อัพโหลด', icon: '📤' }] : []),
     { href: '/chat', label: 'ถาม AI', icon: '💬' },
+    ...(authed ? [{ href: '/templates', label: 'เทมเพลต', icon: '📁' }] : []),
+    ...(authed && role==='ADMIN' && maxLevel==='SECRET' ? [{ href: '/admin/templates', label: 'เทมเพลตผู้ดูแลระบบ', icon: '🛠️' }] : []),
     ...(authed && role==='ADMIN' && maxLevel==='SECRET' ? [{ href: '/admin/users', label: 'ผู้ใช้', icon: '👤' }] : [])
   ]
 

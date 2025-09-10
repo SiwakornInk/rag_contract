@@ -21,3 +21,4 @@ opencv-python
 pytest
 python-jose
 bcrypt
+python-docx
